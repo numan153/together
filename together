@@ -1,0 +1,133 @@
+import pexpect
+
+# Define variables
+ip_address = '192.168.56.101'
+username = 'cisco'
+password = 'cisco123!'
+password_enable = 'class123!'
+new_hostname = 'R1'
+
+# Log session for debugging
+session_log = open('session_log.txt', 'w')
+
+def connect_via_ssh(ip, user, passwd, enable_passwd):
+    print('--- Starting SSH connection...')
+    session = pexpect.spawn(f'ssh -o StrictHostKeyChecking=no {user}@{ip}', encoding='utf-8', timeout=40)
+    session.logfile = session_log  # Enable logging to file
+    
+    # Expect password prompt
+    result = session.expect(['Password:', pexpect.TIMEOUT, pexpect.EOF])
+    if result != 0:
+        print('--- FAILURE! creating SSH session for: ', ip)
+        return None
+    
+    # Send password
+    session.sendline(passwd)
+    result = session.expect(['>', '#', pexpect.TIMEOUT, pexpect.EOF])
+    if result != 0:
+        print('--- FAILURE! entering password for SSH')
+        return None
+
+    print('--- SSH session established.')
+    return session
+
+def connect_via_telnet(ip, user, passwd, enable_passwd):
+    print('--- Starting Telnet connection...')
+    session = pexpect.spawn(f'telnet {ip}', encoding='utf-8', timeout=40)
+    session.logfile = session_log  # Enable logging to file
+    
+    # Expect username prompt
+    result = session.expect(['Username:', pexpect.TIMEOUT])
+    if result != 0:
+        print('--- FAILURE! creating Telnet session for: ', ip)
+        return None
+
+    # Send username
+    session.sendline(user)
+    result = session.expect(['Password:', pexpect.TIMEOUT])
+    if result != 0:
+        print('--- FAILURE! entering username: ', user)
+        return None
+
+    # Send password
+    session.sendline(passwd)
+    result = session.expect(['>', '#', pexpect.TIMEOUT])
+    if result != 0:
+        print('--- FAILURE! entering password for Telnet')
+        return None
+
+    print('--- Telnet session established.')
+    return session
+
+def execute_common_tasks(session):
+    # Enter enable mode
+    print('--- Entering enable mode...')
+    session.sendline('enable')
+    result = session.expect(['Password:', pexpect.TIMEOUT])
+    if result != 0:
+        print('--- Failure! entering enable mode')
+        return
+    
+    # Send enable password
+    session.sendline(password_enable)
+    result = session.expect(['#', pexpect.TIMEOUT])
+    if result != 0:
+        print('--- Failure! entering enable mode after sending password')
+        return
+    
+    # Enter configuration mode
+    print('--- Entering configuration mode...')
+    session.sendline('configure terminal')
+    result = session.expect([r'.\(config\)#', pexpect.TIMEOUT])
+    if result != 0:
+        print('--- Failure! entering config mode')
+        return
+    
+    # Change the hostname
+    print(f'--- Changing hostname to {new_hostname}...')
+    session.sendline(f'hostname {new_hostname}')
+    result = session.expect([rf'{new_hostname}\(config\)#', pexpect.TIMEOUT])
+    if result != 0:
+        print(f'--- Failure! setting hostname to {new_hostname}')
+        return
+    
+    # Exit configuration mode
+    session.sendline('exit')
+
+    # Retrieve and save the running configuration
+    print('--- Retrieving running configuration...')
+    session.sendline('show running-config')
+    result = session.expect(['#', pexpect.TIMEOUT, pexpect.EOF])
+    
+    # Save running configuration to a file
+    if result == 0:
+        running_config = session.before
+        with open('running_config.txt', 'w') as config_file:
+            config_file.write(running_config)
+        print('--- Running configuration saved to running_config.txt')
+    else:
+        print('--- Failure retrieving running configuration')
+
+    # Exit the session
+    print('--- Closing session...')
+    session.sendline('exit')
+
+# Ask the user for connection method
+print('Do you want to use SSH or Telnet?')
+choice = input('Enter "ssh" for SSH or "telnet" for Telnet: ').strip().lower()
+
+# Attempt the connection based on the user's choice
+if choice == 'ssh':
+    session = connect_via_ssh(ip_address, username, password, password_enable)
+elif choice == 'telnet':
+    session = connect_via_telnet(ip_address, username, password, password_enable)
+else:
+    print('Invalid choice! Please run the script again and choose either "ssh" or "telnet".')
+    session = None
+
+# If the session was established, execute common tasks
+if session:
+    execute_common_tasks(session)
+
+# Close the session log
+session_log.close()
