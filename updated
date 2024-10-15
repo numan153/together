@@ -1,0 +1,153 @@
+import pexpect
+
+# Define common variables
+ip_address = '192.168.56.101'
+username_telnet = 'cisco'   # Telnet username
+username_ssh = 'prne'       # SSH username
+password = 'cisco123!'      # Same password for both Telnet and SSH
+password_enable = 'class123!'  # Enable password only for SSH
+new_hostname = 'R1'
+
+# Log session for debugging
+session_log = open('session_log.txt', 'w')
+
+# Ask the user which protocol to use
+connection_type = input('Do you want to use (1) Telnet or (2) SSH? Enter 1 or 2: ')
+
+if connection_type == '1':
+    # Telnet Session (Username: cisco, No enable mode)
+    username = username_telnet
+    print('--- Starting Telnet session...')
+    session = pexpect.spawn(f'telnet {ip_address}', encoding='utf-8', timeout=60)
+    session.logfile = session_log
+    result = session.expect(['Username:', pexpect.TIMEOUT])
+
+    if result != 0:
+        print('--- FAILURE! creating Telnet session for: ', ip_address)
+        session_log.close()
+        exit()
+
+    session.sendline(username)
+    result = session.expect(['Password:', pexpect.TIMEOUT])
+
+    if result != 0:
+        print('--- Failure! entering username for Telnet: ', username)
+        session_log.close()
+        exit()
+
+    session.sendline(password)
+    result = session.expect(['#', '>', pexpect.TIMEOUT])
+
+    if result != 0:
+        print('--- FAILURE! entering password for Telnet')
+        session_log.close()
+        exit()
+
+    print('--- Success! Telnet session established.')
+
+elif connection_type == '2':
+    # SSH Session (Username: prne, with enable mode)
+    username = username_ssh
+    print('--- Starting SSH session...')
+    session = pexpect.spawn(f'ssh -o StrictHostKeyChecking=no {username}@{ip_address}', encoding='utf-8', timeout=60)
+    session.logfile = session_log
+    result = session.expect(['Password:', '(yes/no)', pexpect.TIMEOUT])
+
+    if result == 1:
+        print('--- Accepting SSH key...')
+        session.sendline('yes')
+        result = session.expect(['Password:', pexpect.TIMEOUT])
+
+    if result != 0:
+        print('--- FAILURE! creating SSH session for: ', ip_address)
+        session_log.close()
+        exit()
+
+    session.sendline(password)
+    result = session.expect(['#', '>', pexpect.TIMEOUT])
+
+    if result != 0:
+        print('--- FAILURE! entering password for SSH')
+        session_log.close()
+        exit()
+
+    print('--- Success! SSH session established.')
+
+    # SSH only: Enter enable mode
+    print('--- Entering enable mode (SSH only)...')
+    session.sendline('enable')
+    result = session.expect(['Password:', pexpect.TIMEOUT])
+
+    if result != 0:
+        print('--- Failure! entering enable mode')
+        session_log.close()
+        exit()
+
+    session.sendline(password_enable)
+    result = session.expect(['#', pexpect.TIMEOUT])
+
+    if result != 0:
+        print('--- Failure! entering enable mode after sending password')
+        session_log.close()
+        exit()
+
+else:
+    print('Invalid choice. Please run the script again.')
+    exit()
+
+# Enter configuration mode
+print('--- Entering configuration mode...')
+session.sendline('configure terminal')
+result = session.expect([r'.\(config\)#', pexpect.TIMEOUT])
+
+if result != 0:
+    print('--- Failure! entering config mode')
+    session_log.close()
+    exit()
+
+# Change the hostname to R1
+print(f'--- Changing hostname to {new_hostname}...')
+session.sendline(f'hostname {new_hostname}')
+result = session.expect([rf'{new_hostname}\(config\)#', pexpect.TIMEOUT])
+
+if result != 0:
+    print(f'--- Failure! setting hostname to {new_hostname}')
+    session_log.close()
+    exit()
+
+# Exit configuration mode
+print('--- Exiting configuration mode...')
+session.sendline('exit')
+
+# Send command to output the running configuration
+print('--- Retrieving running configuration...')
+session.sendline('show running-config')
+
+# Capture the running configuration
+result = session.expect(['#', pexpect.TIMEOUT, pexpect.EOF])
+
+# Save running configuration to a file
+if result == 0:
+    running_config = session.before
+    with open('running_config_output.txt', 'w') as config_file:
+        config_file.write(running_config)
+    print('--- Running configuration saved to running_config_output.txt')
+else:
+    print('--- Failure retrieving running configuration')
+
+# Exit the session
+print('--- Closing the session...')
+session.sendline('quit')
+
+# Display success message if everything worked
+print('------------------------------------------------------')
+print('')
+print(f'--- Success! connecting to: {ip_address}')
+print(f'---               Username: {username}')
+print(f'---               Password: {password}')
+print('')
+print('------------------------------------------------------')
+
+# Close the session and log file
+session.close()
+session_log.close()
